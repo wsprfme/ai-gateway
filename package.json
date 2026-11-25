@@ -1,0 +1,24 @@
+{
+  "name": "ai-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pusat kontrol API AI: satu endpoint, satu API key, tracking usage dan biaya",
+  "main": "app.cjs",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "create-key": "node scripts/create-key.js",
+    "test": "node scripts/e2e-test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.11",
+    "better-sqlite3": "^13.2.0",
+    "dotenv": "^18.0.10",
+    "hono": "^4.13.22",
+    "ws": "^8.23.0"
+  }
+}

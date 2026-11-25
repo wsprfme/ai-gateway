@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env
+logs/
+*.log
+.taste-skill/
+certs/
+vendor-src/
+whats.md
+how.md
+.tmp-*
