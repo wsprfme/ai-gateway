@@ -46,22 +46,24 @@ async function api(path, opts = {}) {
 // ---------- Provider identity ----------
 const LOGOS = { meta: '/icons/meta.svg', 'river-ai': '/icons/river-ai.png', codex: '/icons/openai.svg', antigravity: '/icons/antigravity.svg' };
 function logo(slug, name, cls = '') {
-  const src = LOGOS[slug];
-  if (src) return `<img class="logo ${cls}" src="${src}" alt="" width="28" height="28" />`;
-  return `<span class="logo-mono ${cls}" aria-hidden="true">${esc((name || slug || '?').slice(0, 1).toUpperCase())}</span>`;
+  const src = LOGOS[slug] || (slug ? `https://models.dev/logos/${encodeURIComponent(slug)}.svg` : '');
+  const ch = esc((name || slug || '?').slice(0, 1).toUpperCase());
+  if (src) {
+    return `<span class="logo-wrap ${cls}"><img class="logo ${cls}" src="${src}" alt="" width="28" height="28" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false" /><span class="logo-mono ${cls}" aria-hidden="true" hidden>${ch}</span></span>`;
+  }
+  return `<span class="logo-mono ${cls}" aria-hidden="true">${ch}</span>`;
 }
 
 // ---------- Navigation ----------
 const ROUTES = [
   { id: 'overview', label: 'Ringkasan', icon: 'layout-dashboard' },
   { id: 'chat', label: 'Chat', icon: 'message-square' },
-  { id: 'models', label: 'Model', icon: 'boxes' },
   { id: 'providers', label: 'Provider', icon: 'server' },
   { id: 'keys', label: 'API key', icon: 'key-round' },
   { id: 'logs', label: 'Log', icon: 'scroll-text' },
   { id: 'settings', label: 'Pengaturan', icon: 'sliders-horizontal' },
 ];
-const TABS = ['overview', 'chat', 'models', 'logs'];
+const TABS = ['overview', 'chat', 'providers', 'logs'];
 
 function buildNav() {
   $('#nav').innerHTML = ROUTES.map(
@@ -79,7 +81,7 @@ function buildNav() {
     openSheet({
       title: 'Lainnya',
       body: `<div class="card list">
-        ${['providers', 'keys', 'settings']
+        ${['keys', 'settings']
           .map((id) => {
             const r = ROUTES.find((x) => x.id === id);
             return `<a class="row row-link" href="#${id}" data-close style="grid-template-columns:auto 1fr">${icon(r.icon)}<span class="row-title">${r.label}</span></a>`;
@@ -121,12 +123,13 @@ function setActive(id) {
   document.title = `${r.label} · AI Gateway`;
 }
 
-const pages = { overview, chat, models, providers, keys, logs, settings };
+const pages = { overview, chat, models: providers, providers, keys, logs, settings };
 
 async function route({ animate = false } = {}) {
   const myNav = ++navId;
   if (typeof chatAbort !== 'undefined') chatAbort?.abort(); // hentikan benchmark saat pindah halaman
-  const id = location.hash.slice(1) || 'overview';
+  const rawId = location.hash.slice(1) || 'overview';
+  const id = rawId === 'models' ? 'providers' : rawId;
   const render = pages[id] || overview;
   setActive(id);
   document.body.dataset.route = id;
@@ -164,7 +167,7 @@ async function route({ animate = false } = {}) {
 }
 
 async function renderPage(render) {
-  page.onclick = page.onchange = page.onkeydown = null;
+  page.onclick = page.onchange = page.onkeydown = page.oninput = null;
   onresize = null;
   $('#topbar-action').innerHTML = '';
   await render();
@@ -1487,7 +1490,7 @@ function openChatSettings() {
         <label class="field"><span>Temperature</span><input class="input" name="temperature" inputmode="decimal" value="${esc(chatState.temperature)}" placeholder="bawaan" /></label>
       </div>
       ${ms.map((m) => `<p class="hint">${esc(m.display_name || m.id)}: ${esc(m.reasoning)}</p>`).join('')}
-      <p class="hint">Model Antigravity sudah membawa varian di ID-nya (mis. <span class="mono" style="white-space:nowrap">-high</span>). Effort di sini menimpanya kalau diisi.</p>`,
+      <p class="hint">Parameter <span class="mono">reasoning_effort</span> berlaku seragam untuk Meta, River, Codex, dan Antigravity.</p>`,
     submitLabel: 'Simpan',
     onSubmit: (form) => {
       const d = formData(form);
@@ -1615,45 +1618,155 @@ function keyRow(p, k, i, n) {
   </div>`;
 }
 
+// Dropdown model per provider mulai dalam kondisi tertutup; state buka disimpan selama sesi halaman.
+const expandedProviders = new Set();
+
+function providerModelsDropdown(p, pModels) {
+  const open = expandedProviders.has(p.id);
+  const activeCount = pModels.filter((m) => m.enabled).length;
+  return `<div class="prov-models ${open ? 'open' : ''}" data-prov-models="${p.id}">
+    <div class="prov-models-bar">
+      <button type="button" class="prov-models-toggle" data-toggle-models="${p.id}" aria-expanded="${open ? 'true' : 'false'}">
+        <span class="prov-chevron">${icon('chevron-right', 'i-sm')}</span>
+        <span>Model terpasang <b>(${pModels.length})</b></span>
+        <span class="muted" style="font-size:13px">${pModels.length ? `· ${activeCount} aktif` : '· belum ada'}</span>
+      </button>
+      <button type="button" class="btn btn-quiet btn-sm" data-act="pick-models" data-id="${p.id}">${icon('package-plus', 'i-sm')}<span class="hide-sm">Katalog</span></button>
+    </div>
+    <div class="prov-models-body" ${open ? '' : 'hidden'}>
+      ${
+        pModels.length > 8
+          ? `<div class="prov-models-search"><input class="input" type="search" data-filter-models="${p.id}" placeholder="Cari model ${esc(p.name)}…" aria-label="Cari model ${esc(p.name)}" /></div>`
+          : ''
+      }
+      ${
+        pModels.length
+          ? `<div class="list-head model-head"><span>Model</span><span class="wide">Input</span><span class="wide">Cache</span><span class="wide">Output</span><span>Biaya</span><span></span></div>
+             <div class="list" data-models-list="${p.id}">${pModels.map(modelRow).join('')}</div>`
+          : `<div class="empty" style="padding:20px"><p>Belum ada model terpasang. Klik <b>Katalog</b> untuk memilih model ${esc(p.name)}.</p></div>`
+      }
+    </div>
+  </div>`;
+}
+
+function providerCard(p, pModels) {
+  const isSub = p.auth_type !== 'apikey';
+  return `<article class="card ${isSub ? 'prov-sub' : ''}" aria-label="${esc(p.name)}">
+    <div class="group-head">${logo(p.slug, p.name, 'logo-lg')}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <h2 style="margin:0">${esc(p.name)}</h2>
+          ${isSub ? '<span class="badge badge-accent">Langganan · OAuth</span>' : '<span class="badge">Direct API Key</span>'}
+          ${p.enabled ? '' : '<span class="badge">nonaktif</span>'}
+        </div>
+        <span class="muted mono" style="font-size:12.5px">${isSub ? `Fill-first · ${p.keys.length} akun terhubung` : esc(p.base_url)}</span>
+      </div>
+      ${
+        isSub
+          ? `<button type="button" class="btn btn-sm" data-act="usage" data-id="${p.id}">${icon('gauge', 'i-sm')}<span class="hide-sm">Kuota</span></button>`
+          : `<button type="button" class="btn btn-sm" data-act="test" data-id="${p.id}">${icon('plug-zap', 'i-sm')}<span class="hide-sm">Tes</span></button>`
+      }
+      <button type="button" class="btn btn-sm btn-icon" data-act="edit" data-id="${p.id}" aria-label="Ubah ${esc(p.name)}">${icon('pencil', 'i-sm')}</button>
+    </div>
+    <div class="section-head" style="padding:12px 20px 0;margin:0">
+      <span class="label">${isSub ? 'Akun langganan · urutan fill-first' : 'API key · urutan fill-first'}</span>
+      <button type="button" class="btn btn-sm" data-act="${isSub ? 'connect' : 'add-key'}" data-id="${p.id}">${icon('plus', 'i-sm')}${isSub ? 'Hubungkan akun' : 'Tambah key'}</button>
+    </div>
+    <div class="list">${
+      p.keys.length
+        ? p.keys.map((k, i) => keyRow(p, k, i, p.keys.length)).join('')
+        : `<div class="empty" style="padding:20px"><p>${isSub ? `Belum ada akun. Hubungkan atau impor akun ${esc(p.name)} supaya modelnya bisa dipanggil.` : `Belum ada API key. Tambahkan minimal satu supaya model ${esc(p.name)} bisa dipanggil.`}</p></div>`
+    }</div>
+    ${providerModelsDropdown(p, pModels)}
+  </article>`;
+}
+
 async function providers() {
-  const list = await api('/providers');
+  const [list, allModels] = await Promise.all([api('/providers'), api('/models')]);
+  const byProv = new Map();
+  for (const m of allModels) {
+    if (!byProv.has(m.provider_id)) byProv.set(m.provider_id, []);
+    byProv.get(m.provider_id).push(m);
+  }
+  const subs = list.filter((p) => p.auth_type !== 'apikey');
+  const direct = list.filter((p) => p.auth_type === 'apikey');
+
   page.innerHTML = `
-    ${head('Provider', 'API asli di belakang gateway. Tiap provider bisa punya banyak API key: gateway memakai key paling atas sampai bermasalah, baru pindah ke key berikutnya.', `
-      <button type="button" class="btn btn-primary" id="add-prov">${icon('plus', 'i-sm')}Tambah provider</button>`)}
+    ${head('Provider', 'Kelola provider Direct API Key (290+ dari models.dev) dan langganan OAuth beserta modelnya di satu tempat.', `
+      <button type="button" class="btn btn-primary" id="open-dir">${icon('package-plus', 'i-sm')}Tambah provider</button>
+      ${list.length ? `<button type="button" class="btn" id="add-model-btn">${icon('plus', 'i-sm')}Model manual</button>` : ''}`)}
     ${
       list.length
-        ? `<div class="prov-list">${list
-            .map(
-              (p) => `<article class="card" aria-label="${esc(p.name)}">
-          <div class="group-head">${logo(p.slug, p.name, 'logo-lg')}
-            <div style="flex:1;min-width:0"><h2>${esc(p.name)}</h2>
-              <span class="muted mono" style="font-size:13px">${esc(p.base_url)}</span></div>
-            ${p.enabled ? '' : '<span class="badge">nonaktif</span>'}
-            ${p.auth_type !== 'apikey' ? `<span class="badge badge-accent">langganan</span><button type="button" class="btn btn-sm" data-act="usage" data-id="${p.id}">${icon('gauge', 'i-sm')}<span class="hide-sm">Kuota</span></button>` : `<button type="button" class="btn btn-sm" data-act="test" data-id="${p.id}">${icon('plug-zap', 'i-sm')}<span class="hide-sm">Tes</span></button>`}
-            <button type="button" class="btn btn-sm btn-icon" data-act="edit" data-id="${p.id}" aria-label="Ubah ${esc(p.name)}">${icon('pencil', 'i-sm')}</button>
-          </div>
-          <div class="section-head" style="padding:12px 20px 0;margin:0">
-            <span class="label">${p.auth_type !== 'apikey' ? 'Akun · urutan pemakaian' : 'API key · urutan pemakaian'}</span>
-            <button type="button" class="btn btn-sm" data-act="${p.auth_type !== 'apikey' ? 'connect' : 'add-key'}" data-id="${p.id}">${icon('plus', 'i-sm')}${p.auth_type !== 'apikey' ? 'Hubungkan akun' : 'Tambah key'}</button>
-          </div>
-          <div class="list">${
-            p.keys.length
-              ? p.keys.map((k, i) => keyRow(p, k, i, p.keys.length)).join('')
-              : `<div class="empty" style="padding:24px"><p>${p.auth_type !== 'apikey' ? `Belum ada akun. Hubungkan akun ${esc(p.name)} supaya modelnya bisa dipanggil.` : `Belum ada API key. Tambahkan minimal satu supaya model ${esc(p.name)} bisa dipanggil.`}</p></div>`
-          }</div>
-        </article>`
-            )
-            .join('')}</div>`
-        : `<div class="card empty">${icon('server')}<p>Belum ada provider. Cara tercepat: buka katalog di halaman Model.</p>
-           <a class="btn btn-primary" href="#models" data-open-catalog>${icon('package-plus', 'i-sm')}Buka katalog</a></div>`
+        ? `${
+            subs.length
+              ? `<div class="prov-group-label">Langganan (Subscription-to-API · OAuth)</div>
+                 <div class="prov-list" style="margin-bottom:20px">${subs.map((p) => providerCard(p, byProv.get(p.id) || [])).join('')}</div>`
+              : ''
+          }
+          ${
+            direct.length
+              ? `${subs.length ? '<div class="prov-group-label">Direct API Key</div>' : ''}
+                 <div class="prov-list">${direct.map((p) => providerCard(p, byProv.get(p.id) || [])).join('')}</div>`
+              : ''
+          }`
+        : `<div class="card empty">${icon('server')}<p>Belum ada provider. Pilih dari 290+ provider OpenAI-compatible (OpenAI, OpenRouter, Groq, DeepSeek, Meta, River…) atau hubungkan langganan Codex/Antigravity.</p>
+           <button type="button" class="btn btn-primary" id="empty-dir">${icon('package-plus', 'i-sm')}Buka direktori provider</button></div>`
     }`;
 
-  $('#add-prov').onclick = () => providerForm();
-  $('[data-open-catalog]')?.addEventListener('click', () => sessionStorage.setItem('open-catalog', '1'));
+  $('#open-dir').onclick = () => directorySheet();
+  $('#empty-dir')?.addEventListener('click', () => directorySheet());
+  $('#add-model-btn')?.addEventListener('click', () => modelForm(null, list, allModels));
 
   const findProv = (id) => list.find((x) => x.id === Number(id));
+  const findModel = (id) => allModels.find((x) => x.id === id);
+
+  page.oninput = (e) => {
+    const inp = e.target.closest('[data-filter-models]');
+    if (!inp) return;
+    const pid = Number(inp.dataset.filterModels);
+    const q = inp.value.trim().toLowerCase();
+    const box = page.querySelector(`[data-models-list="${pid}"]`);
+    if (!box) return;
+    const rows = (byProv.get(pid) || []).filter(
+      (m) => !q || m.id.toLowerCase().includes(q) || (m.display_name || '').toLowerCase().includes(q)
+    );
+    box.innerHTML = rows.length ? rows.map(modelRow).join('') : '<div class="empty" style="padding:16px"><p>Tidak ada model yang cocok.</p></div>';
+  };
+
+  page.onchange = async (e) => {
+    const sw = e.target.closest('[data-toggle-model]');
+    if (!sw) return;
+    const id = sw.dataset.toggleModel;
+    try {
+      await api('/models/' + encodeURIComponent(id), { method: 'PUT', body: { enabled: sw.checked } });
+      toast(sw.checked ? 'Model diaktifkan' : 'Model dinonaktifkan');
+      route();
+    } catch (err) {
+      sw.checked = !sw.checked;
+      toast(err.message, 'err');
+    }
+  };
 
   page.onclick = async (e) => {
+    if (e.target.closest('.switch, [data-copy], [data-filter-models]')) return;
+    const toggleBtn = e.target.closest('[data-toggle-models]');
+    if (toggleBtn) {
+      const pid = Number(toggleBtn.dataset.toggleModels);
+      const wrap = toggleBtn.closest('[data-prov-models]');
+      const body = wrap.querySelector('.prov-models-body');
+      const nowOpen = !expandedProviders.has(pid);
+      if (nowOpen) expandedProviders.add(pid);
+      else expandedProviders.delete(pid);
+      wrap.classList.toggle('open', nowOpen);
+      toggleBtn.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+      body.hidden = !nowOpen;
+      return;
+    }
+    const mrow = e.target.closest('[data-model]');
+    if (mrow) {
+      const m = findModel(mrow.dataset.model);
+      if (m) return modelDetail(m, list, allModels);
+    }
     const mv = e.target.closest('[data-move]');
     if (mv) {
       e.stopPropagation();
@@ -1678,6 +1791,7 @@ async function providers() {
     if (b.dataset.act === 'add-key') return addKeyForm(p);
     if (b.dataset.act === 'connect') return connectAccount(p.slug, p.auth_type, p.id);
     if (b.dataset.act === 'usage') return showUsage(p);
+    if (b.dataset.act === 'pick-models') return providerInstallSheet(p.slug, p);
     b.disabled = true;
     try {
       const r = await api(`/providers/${p.id}/upstream-models`);
@@ -1685,7 +1799,11 @@ async function providers() {
         title: `${p.name} terhubung`,
         leading: logo(p.slug, p.name),
         body: `<p class="note">Lewat key "${esc(r.key)}", respons dalam ${fmtMs(r.latency_ms)}. ${r.models.length} model tersedia:</p>
-          <pre class="code" style="max-height:320px">${esc(r.models.join('\n') || '(kosong)')}</pre>`,
+          <pre class="code" style="max-height:320px">${esc(r.models.join('\n') || '(kosong)')}</pre>
+          ${r.models.length ? `<div style="margin-top:12px"><button type="button" class="btn btn-primary btn-block" id="ts-import">${icon('package-plus', 'i-sm')}Impor model dari daftar ini</button></div>` : ''}`,
+        onOpen: ({ el, close }) => {
+          $('#ts-import', el)?.addEventListener('click', () => { close(); customImportSheet(p, r); });
+        },
       });
     } catch (err) {
       openSheet({ title: `${p.name} gagal`, leading: logo(p.slug, p.name), body: `<pre class="err-text">${esc(err.message)}</pre>` });
@@ -1694,9 +1812,294 @@ async function providers() {
     }
   };
   page.onkeydown = (e) => {
-    const row = e.target.closest('.key-row');
+    const row = e.target.closest('.key-row, [data-model]');
     if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); row.click(); }
   };
+
+  if (sessionStorage.getItem('open-catalog')) {
+    sessionStorage.removeItem('open-catalog');
+    directorySheet();
+  }
+}
+
+// Direktori provider terpadu: Langganan (OAuth) + Direct API Key (Meta, River, + 290+ provider models.dev).
+function directorySheet() {
+  openSheet({
+    title: 'Tambah provider',
+    wide: true,
+    body: `
+      <div class="dir-top">
+        <input class="input" type="search" id="dir-q" placeholder="Cari provider (OpenAI, OpenRouter, Groq, DeepSeek, xAI, Meta…)" autocomplete="off" />
+        <button type="button" class="btn" id="dir-custom">${icon('plus', 'i-sm')}Custom URL</button>
+      </div>
+      <div id="dir-body"><div class="skeleton" style="height:180px"></div></div>`,
+    onOpen: ({ el, close }) => {
+      const qEl = $('#dir-q', el);
+      const box = $('#dir-body', el);
+      let timer = 0;
+
+      const render = (data, q) => {
+        const provs = data.providers || [];
+        const subs = provs.filter((p) => p.oauth);
+        const direct = provs.filter((p) => !p.oauth);
+        const card = (p) => `<button type="button" class="dir-item" data-pick-prov="${esc(p.slug)}">
+          ${logo(p.slug, p.name)}
+          <div class="dir-item-text">
+            <div class="row-title">${esc(p.name)}${p.installed ? ' <span class="badge badge-ok">terpasang</span>' : ''}</div>
+            <div class="muted" style="font-size:12.5px">${p.model_count} model${p.oauth ? ' · OAuth' : ''}</div>
+          </div>
+          ${icon('chevron-right', 'i-sm')}
+        </button>`;
+        if (!provs.length) {
+          box.innerHTML = `<div class="empty" style="padding:28px"><p>Tidak ada provider untuk "${esc(q)}". Bisa tambah manual lewat <b>Custom URL</b>.</p></div>`;
+          return;
+        }
+        box.innerHTML = `
+          ${subs.length ? `<div class="label" style="margin:12px 0 8px">Langganan (Subscription-to-API · OAuth)</div><div class="dir-grid">${subs.map(card).join('')}</div>` : ''}
+          ${
+            direct.length
+              ? `<div class="label" style="margin:14px 0 8px">Direct API Key (${q ? direct.length + ' cocok' : `${data.total - subs.length} tersedia via katalog & models.dev`})</div>
+                 <div class="dir-grid">${direct.map(card).join('')}</div>`
+              : ''
+          }
+          ${data.models_dev_error ? `<p class="hint" style="margin-top:10px">Katalog models.dev tidak dapat dimuat (${esc(data.models_dev_error)}). Menampilkan katalog bawaan.</p>` : ''}`;
+      };
+
+      const load = async (q = '') => {
+        try {
+          const data = await api(`/directory?q=${encodeURIComponent(q)}&limit=80`);
+          render(data, q);
+        } catch (err) {
+          box.innerHTML = `<pre class="err-text">${esc(err.message)}</pre>`;
+        }
+      };
+
+      load('');
+      qEl.oninput = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => load(qEl.value.trim()), 150);
+      };
+      $('#dir-custom', el).onclick = () => { close(); providerForm(); };
+      box.onclick = (e) => {
+        const b = e.target.closest('[data-pick-prov]');
+        if (!b) return;
+        close();
+        providerInstallSheet(b.dataset.pickProv);
+      };
+    },
+  });
+}
+
+// Impor model langsung dari GET /v1/models milik provider custom (Ollama, vLLM, LiteLLM, dll.).
+function customImportSheet(p, prefetched = null) {
+  openSheet({
+    title: `Impor model · ${p.name}`,
+    leading: logo(p.slug, p.name),
+    wide: true,
+    body: `<div id="ci-body"><div class="skeleton" style="height:180px"></div></div>`,
+    onOpen: async ({ el, close }) => {
+      const box = $('#ci-body', el);
+      let r = prefetched;
+      if (!r) {
+        try {
+          r = await api(`/providers/${p.id}/upstream-models`);
+        } catch (err) {
+          box.innerHTML = `<pre class="err-text">${esc(err.message)}</pre>`;
+          return;
+        }
+      }
+      const items = r.items || (r.models || []).map((u) => ({ upstream: u, id: `${p.slug}/${u.replace(/\//g, '-')}`, installed: false }));
+      if (!items.length) {
+        box.innerHTML = `<div class="empty" style="padding:24px"><p>Endpoint <span class="mono">/models</span> milik ${esc(p.name)} tidak mengembalikan model.</p></div>`;
+        return;
+      }
+      const selected = new Set(items.filter((m) => !m.installed).slice(0, items.length <= 25 ? items.length : 0).map((m) => m.upstream));
+      const renderList = (q = '') => {
+        const fq = q.trim().toLowerCase();
+        const filtered = fq ? items.filter((m) => m.upstream.toLowerCase().includes(fq)) : items;
+        $('#ci-list', el).innerHTML = filtered.slice(0, 150).map((m) => `<label class="dir-model-row">
+          <input type="checkbox" data-ci-m="${esc(m.upstream)}" ${selected.has(m.upstream) ? 'checked' : ''} ${m.installed ? 'disabled' : ''} />
+          <div style="min-width:0;flex:1">
+            <div class="row-title mono" style="font-size:13.5px">${esc(m.upstream)}${m.installed ? ' <span class="badge">terpasang</span>' : ''}</div>
+            <div class="mono muted" style="font-size:12px">${esc(m.id)}</div>
+          </div>
+        </label>`).join('') || '<div class="empty" style="padding:16px"><p>Tidak ada model yang cocok.</p></div>';
+        $('#ci-count', el).textContent = `${selected.size} dipilih`;
+      };
+      box.innerHTML = `
+        <p class="note">Diambil langsung dari <span class="mono">${esc(p.base_url)}/models</span> (${items.length} model). Harga awal $0 — bisa diubah kapan saja di detail model.</p>
+        <div class="dir-top" style="margin-bottom:8px">
+          <input class="input" type="search" id="ci-q" placeholder="Cari dari ${items.length} model…" />
+          <button type="button" class="btn btn-sm" id="ci-all">Pilih semua</button>
+          <button type="button" class="btn btn-sm" id="ci-none">Kosongkan</button>
+        </div>
+        <div id="ci-list" class="dir-model-list"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px">
+          <span class="muted" id="ci-count" style="font-size:13.5px">0 dipilih</span>
+          <button type="button" class="btn btn-primary" id="ci-submit">${icon('package-plus', 'i-sm')}Impor model</button>
+        </div>`;
+      renderList('');
+      $('#ci-q', el).oninput = (e) => renderList(e.target.value);
+      $('#ci-list', el).onchange = (e) => {
+        const cb = e.target.closest('[data-ci-m]');
+        if (!cb) return;
+        if (cb.checked) selected.add(cb.dataset.ciM);
+        else selected.delete(cb.dataset.ciM);
+        $('#ci-count', el).textContent = `${selected.size} dipilih`;
+      };
+      $('#ci-all', el).onclick = () => {
+        const fq = $('#ci-q', el).value.trim().toLowerCase();
+        for (const m of items) if (!m.installed && (!fq || m.upstream.toLowerCase().includes(fq))) selected.add(m.upstream);
+        renderList($('#ci-q', el).value);
+      };
+      $('#ci-none', el).onclick = () => { selected.clear(); renderList($('#ci-q', el).value); };
+      $('#ci-submit', el).onclick = async (ev) => {
+        if (!selected.size) return toast('Pilih minimal satu model.', 'err');
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'Mengimpor…';
+        try {
+          const res = await api(`/providers/${p.id}/import-models`, { method: 'POST', body: { models: [...selected] } });
+          expandedProviders.add(p.id);
+          toast(`${res.added} model diimpor`);
+          close();
+          route();
+        } catch (err) {
+          toast(err.message, 'err');
+          btn.disabled = false;
+          btn.textContent = 'Impor model';
+        }
+      };
+    },
+  });
+}
+
+// Sheet pasang / tambah model untuk 1 provider dari direktori (bawaan atau models.dev).
+function providerInstallSheet(slug, provObj = null) {
+  openSheet({
+    title: 'Memuat provider…',
+    wide: true,
+    body: `<div id="pi-body"><div class="skeleton" style="height:200px"></div></div>`,
+    onOpen: async ({ el, close }) => {
+      const box = $('#pi-body', el);
+      let p;
+      try {
+        p = await api('/directory/' + encodeURIComponent(slug));
+      } catch (err) {
+        if (provObj && provObj.auth_type === 'apikey') {
+          close();
+          return customImportSheet(provObj);
+        }
+        box.innerHTML = `<pre class="err-text">${esc(err.message)}</pre>`;
+        return;
+      }
+      const titleEl = el.querySelector('.sheet-head h2');
+      if (titleEl) titleEl.textContent = p.name;
+
+      // Pilih otomatis semua jika <= 25 model, atau yang belum terpasang; untuk aggregator besar (>25) biarkan user memilih.
+      const selected = new Set(p.models.length <= 25 ? p.models.map((m) => m.upstream) : p.models.filter((m) => m.installed).map((m) => m.upstream));
+
+      const renderList = (q = '') => {
+        const fq = q.trim().toLowerCase();
+        const items = fq
+          ? p.models.filter((m) => m.upstream.toLowerCase().includes(fq) || (m.display_name || '').toLowerCase().includes(fq))
+          : p.models;
+        const listEl = $('#pi-list', el);
+        listEl.innerHTML = items.slice(0, 120).map((m) => {
+          const checked = selected.has(m.upstream);
+          const price = (m.kind || 'text') === 'text'
+            ? `${fmtPrice(m.input)} / ${fmtPrice(m.output)}`
+            : esc(unitPrice({ ...m, price_image: m.price_image, price_frame: m.price_frame, price_audio_hour: m.price_audio_hour }));
+          return `<label class="dir-model-row">
+            <input type="checkbox" data-pick-m="${esc(m.upstream)}" ${checked ? 'checked' : ''} />
+            <div style="min-width:0;flex:1">
+              <div class="row-title">${esc(m.display_name)}${m.installed ? ' <span class="badge">terpasang</span>' : ''}</div>
+              <div class="mono muted" style="font-size:12px">${esc(m.id)}</div>
+            </div>
+            <div class="cols"><div>${price}</div><div class="muted">${m.context_window ? fmtCtx(m.context_window) : KIND[m.kind || 'text']?.label || ''}</div></div>
+          </label>`;
+        }).join('') || '<div class="empty" style="padding:16px"><p>Tidak ada model yang cocok.</p></div>';
+        if (items.length > 120) {
+          listEl.insertAdjacentHTML('beforeend', `<p class="hint" style="padding:8px 4px">Menampilkan 120 dari ${items.length} model. Ketik pencarian untuk menyaring.</p>`);
+        }
+        $('#pi-count', el).textContent = `${selected.size} dipilih`;
+      };
+
+      box.innerHTML = `
+        <div class="prov-top" style="margin-bottom:14px">
+          ${logo(p.slug, p.name, 'logo-lg')}
+          <div style="flex:1;min-width:0">
+            <div class="row-title">${esc(p.name)} ${p.oauth ? '<span class="badge badge-accent">Langganan · OAuth</span>' : '<span class="badge">Direct API Key</span>'}</div>
+            <span class="mono muted" style="font-size:12.5px">${esc(p.base_url)}</span>
+          </div>
+          ${p.docs ? `<a class="btn btn-quiet btn-icon btn-sm" href="${esc(p.docs)}" target="_blank" rel="noopener" aria-label="Dokumentasi">${icon('external-link', 'i-sm')}</a>` : ''}
+        </div>
+        ${
+          p.oauth
+            ? `<p class="note">Provider langganan OAuth. Setelah memasang model, hubungkan atau impor akun ${esc(p.name)} tanpa API key.</p>`
+            : `<label class="field" style="margin-bottom:14px">
+                 <span>API key ${esc(p.name)} ${p.has_key ? `(${p.key_count} key tersimpan · opsional)` : ''}</span>
+                 <input class="input" type="password" id="pi-key" autocomplete="off" placeholder="${p.has_key ? 'Kosongkan untuk memakai key yang sudah ada' : 'Tempel API key di sini'}" />
+               </label>`
+        }
+        <div class="dir-top" style="margin-bottom:8px">
+          <input class="input" type="search" id="pi-q" placeholder="Cari dari ${p.models.length} model…" />
+          <button type="button" class="btn btn-sm" id="pi-all">Pilih semua</button>
+          <button type="button" class="btn btn-sm" id="pi-none">Kosongkan</button>
+        </div>
+        <div id="pi-list" class="dir-model-list"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;flex-wrap:wrap">
+          <span class="muted" id="pi-count" style="font-size:13.5px">0 dipilih</span>
+          <button type="button" class="btn btn-primary" id="pi-submit">${icon('package-plus', 'i-sm')}${p.installed ? 'Pasang / perbarui' : 'Pasang provider'}</button>
+        </div>`;
+
+      renderList('');
+      $('#pi-q', el).oninput = (e) => renderList(e.target.value);
+      $('#pi-list', el).onchange = (e) => {
+        const cb = e.target.closest('[data-pick-m]');
+        if (!cb) return;
+        if (cb.checked) selected.add(cb.dataset.pickM);
+        else selected.delete(cb.dataset.pickM);
+        $('#pi-count', el).textContent = `${selected.size} dipilih`;
+      };
+      $('#pi-all', el).onclick = () => {
+        const fq = $('#pi-q', el).value.trim().toLowerCase();
+        for (const m of p.models) {
+          if (!fq || m.upstream.toLowerCase().includes(fq) || (m.display_name || '').toLowerCase().includes(fq)) selected.add(m.upstream);
+        }
+        renderList($('#pi-q', el).value);
+      };
+      $('#pi-none', el).onclick = () => { selected.clear(); renderList($('#pi-q', el).value); };
+      $('#pi-submit', el).onclick = async (ev) => {
+        const btn = ev.currentTarget;
+        if (!selected.size && !p.installed && !$('#pi-key', el)?.value.trim() && !p.oauth) {
+          return toast('Pilih minimal satu model atau isi API key.', 'err');
+        }
+        btn.disabled = true;
+        btn.textContent = 'Memasang…';
+        try {
+          const apiKey = $('#pi-key', el)?.value.trim() || '';
+          const r = await api(`/directory/${encodeURIComponent(p.slug)}/install`, {
+            method: 'POST',
+            body: { ...(apiKey ? { api_key: apiKey } : {}), models: [...selected] },
+          });
+          if (r.provider_id) expandedProviders.add(r.provider_id);
+          toast(`${r.added} model baru, ${r.updated} diperbarui (${r.price_source})`);
+          close();
+          if (r.oauth && !r.has_key) {
+            route();
+            return connectAccount(p.slug, r.auth_type, r.provider_id);
+          }
+          if (!r.has_key && !r.oauth) toast('Provider terpasang. Tambahkan API key supaya modelnya bisa dipanggil.', 'err');
+          route();
+        } catch (err) {
+          toast(err.message, 'err');
+          btn.disabled = false;
+          btn.textContent = 'Pasang provider';
+        }
+      };
+    },
+  });
 }
 
 // Hubungkan akun langganan OAuth (Codex): login browser (paste-redirect PKCE) atau tempel auth.json.
@@ -2199,9 +2602,9 @@ async function settings() {
       <button class="btn btn-primary" type="submit">Simpan pengaturan</button>
     </form>
     <section class="section card card-pad" style="max-width:640px">
-      <h2 style="margin-bottom:8px">Endpoint gateway</h2>
+      <h2 style="margin-bottom:8px">Endpoint gateway & dokumentasi</h2>
       ${copyChip(GATEWAY)}
-      <p class="muted" style="margin:12px 0 0;font-size:15px">Tersedia: /chat/completions, /responses, /completions, /embeddings, /images/generations, /images/edits, /asr/transcribe, /asr/realtime (WebSocket), /models.</p>
+      <p class="muted" style="margin:12px 0 0;font-size:14.5px">Dokumentasi publik: <a href="/docs" target="_blank" rel="noopener">/docs</a> (OpenAPI interaktif), <a href="/openapi.json" target="_blank" rel="noopener">/openapi.json</a>, dan <a href="/models.md" target="_blank" rel="noopener">/models.md</a> (katalog Markdown).</p>
     </section>`;
   $('#sf').onsubmit = async (e) => {
     e.preventDefault();

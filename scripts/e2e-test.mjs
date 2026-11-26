@@ -28,6 +28,27 @@ const upstream = http.createServer(async (req, res) => {
   seen.push({ url: req.url, auth: req.headers.authorization, accept: req.headers.accept, ctype: req.headers['content-type'],
     accountId: req.headers['chatgpt-account-id'], originator: req.headers['originator'], version: req.headers['version'], body });
   const json = (o) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+  // ---- Mock models.dev/api.json ----
+  if (req.url === '/models-dev.json') {
+    return json({
+      groq: {
+        name: 'Groq',
+        api: `http://127.0.0.1:${UP_PORT}/v1`,
+        npm: '@ai-sdk/openai-compatible',
+        doc: 'https://console.groq.com/docs',
+        models: {
+          'llama-3.3-70b-versatile': { name: 'Llama 3.3 70B', cost: { input: 0.59, output: 0.79 }, limit: { context: 131072, output: 32768 }, reasoning: false },
+          'qwen-qwq-32b': { name: 'Qwen QwQ 32B', cost: { input: 0.29, output: 0.39 }, limit: { context: 131072, output: 16384 }, reasoning: true },
+        },
+      },
+      'non-oai': {
+        name: 'Non-OpenAI SDK',
+        api: 'https://example.com',
+        npm: '@ai-sdk/anthropic',
+        models: { 'x': { name: 'X', cost: { input: 1, output: 2 } } },
+      },
+    });
+  }
   // ---- Codex (langganan ChatGPT) palsu ----
   if (req.url === '/codex-token') return json({ access_token: 'AT2', refresh_token: 'RT2', expires_in: 3600, id_token: '' });
   if (req.url === '/codex-usage') {
@@ -200,6 +221,7 @@ const gw = spawn(process.execPath, ['src/server.js'], {
     AG_BASE_URL: `http://127.0.0.1:${UP_PORT}`, AG_TOKEN_URL: `http://127.0.0.1:${UP_PORT}/ag-token`,
     AG_CODEASSIST_URL: `http://127.0.0.1:${UP_PORT}/v1internal:loadCodeAssist`, AG_ONBOARD_URL: `http://127.0.0.1:${UP_PORT}/v1internal:onboardUser`,
     AG_OAUTH_CLIENT_ID: 'test-ag-client-id', AG_OAUTH_CLIENT_SECRET: 'test-ag-client-secret',
+    MODELS_DEV_URL: `http://127.0.0.1:${UP_PORT}/models-dev.json`,
     QUOTA_CHECK_TTL_MS: '50' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -890,6 +912,47 @@ try {
     assert.ok(md.includes('`/v1/audio/transcriptions`'));
     assert.ok(!md.includes('| Upstream |'), 'kolom Upstream internal tidak tampil di /models.md');
     assert.ok(!md.includes('Base URL:'), 'base URL internal tidak tampil di /models.md');
+  });
+
+  await test('direktori models.dev: filter OpenAI-compatible, cari, dan install model terpilih', async () => {
+    const d = (await admin('/directory?q=groq')).data;
+    assert.ok(d.providers.some((p) => p.slug === 'groq' && p.model_count === 2), 'groq ditemukan dari models.dev');
+    assert.ok(!d.providers.some((p) => p.slug === 'non-oai'), 'provider non-OpenAI disaring');
+
+    const det = (await admin('/directory/groq')).data;
+    assert.equal(det.models.length, 2);
+    assert.equal(det.logo, 'https://models.dev/logos/groq.svg');
+
+    const ins = (await admin('/directory/groq/install', 'POST', { api_key: 'GROQ-KEY-1', models: ['llama-3.3-70b-versatile'] })).data;
+    assert.equal(ins.ok, true);
+    assert.equal(ins.added, 1, 'hanya memasang model yang dipilih');
+    assert.equal(ins.has_key, true);
+
+    const ms = (await admin('/models')).data;
+    const groqM = ms.find((m) => m.id === 'groq/llama-3.3-70b-versatile');
+    assert.ok(groqM && groqM.input_price === 0.59 && groqM.output_price === 0.79);
+  });
+
+  await test('OpenAPI /openapi.json, /docs, dan impor model custom dari /v1/models', async () => {
+    const rSpec = await fetch(GW + '/openapi.json');
+    assert.equal(rSpec.status, 200);
+    const spec = await rSpec.json();
+    assert.equal(spec.openapi, '3.1.0');
+    assert.ok(spec.paths['/v1/models/{model}'] && spec.paths['/v1/audio/transcriptions'] && spec.paths['/v1/chat/completions']);
+    assert.ok(spec.servers[0].url.includes(`127.0.0.1:${GW_PORT}`));
+
+    const rDocs = await fetch(GW + '/docs');
+    assert.equal(rDocs.status, 200);
+    assert.ok((await rDocs.text()).includes('/openapi.json'));
+
+    const custom = (await admin('/providers', 'POST', { slug: 'my-ollama', name: 'My Ollama', base_url: `http://127.0.0.1:${UP_PORT}/v1`, api_key: 'OLLAMA-KEY' })).data;
+    const up = (await admin(`/providers/${custom.id}/upstream-models`)).data;
+    assert.equal(up.items.length, 2);
+    const imp = (await admin(`/providers/${custom.id}/import-models`, 'POST', { models: ['real-a', 'real-b'] })).data;
+    assert.equal(imp.ok, true);
+    assert.equal(imp.added, 2);
+    const ms = (await admin('/models')).data;
+    assert.ok(ms.some((m) => m.id === 'my-ollama/real-a') && ms.some((m) => m.id === 'my-ollama/real-b'));
   });
 
   await test('key dinonaktifkan ditolak', async () => {

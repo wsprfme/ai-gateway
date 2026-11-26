@@ -13,6 +13,7 @@ const { handleProxy, authenticate, listModels, getModel } = await import('./prox
 const { admin } = await import('./admin.js');
 const { attachRealtime } = await import('./realtime.js');
 const { renderModelsMarkdown } = await import('./modelsmd.js');
+const { buildOpenApiSpec, renderDocsHtml } = await import('./openapi.js');
 const { renderIndex, renderModule } = await import('./assets.js');
 
 const app = new Hono();
@@ -55,6 +56,18 @@ app.get('/models.md', (c) => {
   return c.body(renderModelsMarkdown());
 });
 
+// Spesifikasi OpenAPI 3.1 + dokumentasi interaktif (tanpa auth).
+app.get('/openapi.json', (c) => {
+  const proto = c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.replace(':', '');
+  const host = c.req.header('x-forwarded-host') || c.req.header('host') || new URL(c.req.url).host;
+  c.header('cache-control', 'public, max-age=300');
+  return c.json(buildOpenApiSpec(`${proto}://${host}`));
+});
+app.get('/docs', (c) => {
+  c.header('cache-control', 'public, max-age=300');
+  return c.html(renderDocsHtml());
+});
+
 // Dashboard
 app.route('/api/admin', admin);
 // Static caching: icons and fonts rarely change; the app shell is revalidated on each full load.
@@ -62,7 +75,7 @@ app.route('/api/admin', admin);
 app.use('/*', async (c, next) => {
   await next();
   const p = c.req.path;
-  if (c.res.status !== 200 || p.startsWith('/api/') || p.startsWith('/v1/') || p === '/models.md') return;
+  if (c.res.status !== 200 || p.startsWith('/api/') || p.startsWith('/v1/') || p === '/models.md' || p === '/openapi.json' || p === '/docs') return;
   const cc = c.req.query('v')
     ? 'public, max-age=31536000, immutable'
     : p.startsWith('/icons/') || p.startsWith('/fonts/')

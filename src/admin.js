@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { db, getAllSettings, setSetting, DEFAULT_SETTINGS, startOfToday, startOfMonth } from './db.js';
 import { encrypt, decrypt, sha256, generateApiKey, safeEqual, signSession, verifySession } from './crypto.js';
 import { CATALOG, publicModelId, fetchRiverPricing } from './catalog.js';
+import { loadModelsDev, getModelsDevProvider } from './modelsdev.js';
 import { handleProxy } from './proxy.js';
 import * as codexAdapter from './adapters/codex.js';
 import * as antigravityAdapter from './adapters/antigravity.js';
@@ -220,10 +221,52 @@ admin.get('/providers/:id/upstream-models', async (c) => {
   const key = usableKeys(p.id)[0];
   if (!key) return bad(c, 'Tidak ada API key yang bisa dipakai untuk provider ini.');
   try {
-    return c.json({ ok: true, key: key.name, ...(await listUpstreamModels(p.base_url, key.secret)) });
+    const r = await listUpstreamModels(p.base_url, key.secret);
+    const installed = new Set(db.prepare('SELECT id FROM models WHERE provider_id = ?').all(p.id).map((m) => m.id));
+    const items = r.models.map((upstream) => ({
+      upstream,
+      id: publicModelId(p.slug, upstream),
+      installed: installed.has(publicModelId(p.slug, upstream)),
+    }));
+    return c.json({ ok: true, key: key.name, ...r, items });
   } catch (e) {
     return bad(c, `Gagal terhubung: ${e.message}`, 502);
   }
+});
+
+// Impor model terpilih hasil fetch /v1/models dari provider custom (Ollama, vLLM, LiteLLM, dll.).
+admin.post('/providers/:id/import-models', async (c) => {
+  const p = db.prepare('SELECT * FROM providers WHERE id = ?').get(Number(c.req.param('id')));
+  if (!p) return bad(c, 'Provider tidak ditemukan.', 404);
+  const b = await c.req.json().catch(() => ({}));
+  const list = Array.isArray(b.models) ? b.models.map((s) => String(s || '').trim()).filter(Boolean) : [];
+  if (!list.length) return bad(c, 'Pilih minimal satu model untuk diimpor.');
+  let added = 0;
+  let skipped = 0;
+  db.transaction(() => {
+    for (const upstream of list) {
+      const id = publicModelId(p.slug, upstream);
+      if (db.prepare('SELECT 1 FROM models WHERE id = ?').get(id)) {
+        skipped++;
+        continue;
+      }
+      insertModel.run({
+        ...modelRow({
+          id,
+          provider_id: p.id,
+          upstream_model: upstream,
+          display_name: upstream,
+          kind: /image|imagen|dall-e/i.test(upstream) ? 'image' : 'text',
+          input_price: 0,
+          output_price: 0,
+          enabled: 1,
+        }),
+        created_at: Date.now(),
+      });
+      added++;
+    }
+  })();
+  return c.json({ ok: true, added, skipped });
 });
 
 // ---------- Pool API key provider ----------
@@ -475,6 +518,194 @@ admin.post('/catalog/:slug/install', async (c) => {
       }
     }
   })();
+  return c.json({
+    ok: true,
+    added,
+    updated,
+    price_source: priceSource,
+    has_key: countKeys.get(provider.id).n > 0,
+    provider_id: provider.id,
+    auth_type: provider.auth_type,
+    oauth: !!preset.oauth,
+  });
+});
+
+// ---------- Direktori provider terpadu (bawaan + models.dev / @opencode-ai/models) ----------
+admin.get('/directory', async (c) => {
+  const q = (c.req.query('q') || '').trim().toLowerCase();
+  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 80, 1), 400);
+  const providersDb = new Map(db.prepare('SELECT slug, id FROM providers').all().map((p) => [p.slug, p]));
+  const modelCounts = new Map(
+    db.prepare('SELECT p.slug, COUNT(m.id) AS n FROM providers p LEFT JOIN models m ON m.provider_id = p.id GROUP BY p.id').all().map((r) => [r.slug, r.n])
+  );
+
+  const builtin = Object.entries(CATALOG).map(([slug, p]) => {
+    const dbp = providersDb.get(slug);
+    return {
+      slug,
+      name: p.name,
+      base_url: p.base_url,
+      logo: p.icon,
+      docs: p.docs || '',
+      auth_type: p.auth_type || 'apikey',
+      oauth: !!p.oauth,
+      builtin: true,
+      source: 'builtin',
+      model_count: p.models.length,
+      installed: !!dbp,
+      has_key: dbp ? countKeys.get(dbp.id).n > 0 : false,
+      key_count: dbp ? countKeys.get(dbp.id).n : 0,
+      installed_models: modelCounts.get(slug) || 0,
+    };
+  });
+
+  const md = await loadModelsDev();
+  const remote = (md.providers || [])
+    .filter((p) => !CATALOG[p.slug])
+    .map((p) => {
+      const dbp = providersDb.get(p.slug);
+      return {
+        slug: p.slug,
+        name: p.name,
+        base_url: p.base_url,
+        logo: p.logo,
+        docs: p.docs,
+        auth_type: 'apikey',
+        oauth: false,
+        builtin: false,
+        source: 'models.dev',
+        model_count: p.models.length,
+        installed: !!dbp,
+        has_key: dbp ? countKeys.get(dbp.id).n > 0 : false,
+        key_count: dbp ? countKeys.get(dbp.id).n : 0,
+        installed_models: modelCounts.get(p.slug) || 0,
+      };
+    });
+
+  let combined = [...builtin, ...remote];
+  if (q) {
+    combined = combined.filter(
+      (p) => p.slug.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || p.base_url.toLowerCase().includes(q)
+    );
+  }
+  return c.json({
+    total: combined.length,
+    models_dev_total: (md.providers || []).length,
+    models_dev_error: md.error || null,
+    providers: combined.slice(0, limit),
+  });
+});
+
+admin.get('/directory/:slug', async (c) => {
+  const slug = c.req.param('slug');
+  const installed = new Set(db.prepare('SELECT id FROM models').all().map((r) => r.id));
+  const dbp = db.prepare('SELECT id, slug FROM providers WHERE slug = ?').get(slug);
+  const preset = CATALOG[slug] || (await getModelsDevProvider(slug));
+  if (!preset) return bad(c, 'Provider tidak ditemukan di direktori.', 404);
+  return c.json({
+    slug,
+    name: preset.name,
+    base_url: preset.base_url,
+    logo: preset.icon || preset.logo,
+    docs: preset.docs || '',
+    auth_type: preset.auth_type || 'apikey',
+    oauth: !!preset.oauth,
+    builtin: !!CATALOG[slug],
+    installed: !!dbp,
+    has_key: dbp ? countKeys.get(dbp.id).n > 0 : false,
+    key_count: dbp ? countKeys.get(dbp.id).n : 0,
+    models: preset.models.map((m) => ({
+      id: publicModelId(slug, m.upstream),
+      upstream: m.upstream,
+      display_name: m.display_name,
+      kind: m.kind || 'text',
+      input: m.input ?? 0,
+      cached: m.cached ?? null,
+      output: m.output ?? 0,
+      price_image: m.price_image ?? null,
+      price_frame: m.price_frame ?? null,
+      price_audio_hour: m.price_audio_hour ?? null,
+      context_window: m.context_window ?? null,
+      max_output: m.max_output ?? null,
+      reasoning: m.reasoning ?? null,
+      installed: installed.has(publicModelId(slug, m.upstream)),
+    })),
+  });
+});
+
+admin.post('/directory/:slug/install', async (c) => {
+  const slug = c.req.param('slug');
+  const isBuiltin = !!CATALOG[slug];
+  const preset = CATALOG[slug] || (await getModelsDevProvider(slug));
+  if (!preset) return bad(c, 'Provider tidak ditemukan di direktori.', 404);
+  const b = await c.req.json().catch(() => ({}));
+
+  let live = null;
+  let priceSource = isBuiltin ? 'katalog bawaan' : 'models.dev';
+  if (preset.live_pricing) {
+    try {
+      live = await fetchRiverPricing();
+      priceSource = 'harga live River';
+    } catch (e) {
+      priceSource = `katalog bawaan (harga live gagal: ${e.message})`;
+    }
+  }
+
+  let provider = db.prepare('SELECT * FROM providers WHERE slug = ?').get(slug);
+  if (!provider) {
+    db.prepare(
+      `INSERT INTO providers (slug, name, base_url, stream_usage, allow_passthrough, enabled, auth_type, created_at)
+       VALUES (?, ?, ?, 1, ?, 1, ?, ?)`
+    ).run(slug, preset.name, preset.base_url, isBuiltin ? (preset.allow_passthrough ? 1 : 0) : 1, preset.auth_type || 'apikey', Date.now());
+  }
+  provider = db.prepare('SELECT * FROM providers WHERE slug = ?').get(slug);
+  if (b.api_key && !preset.oauth) addProviderKey(provider.id, b.api_key, b.key_name);
+
+  const picked = Array.isArray(b.models) && b.models.length ? new Set(b.models) : null;
+  const targets = picked ? preset.models.filter((m) => picked.has(m.upstream) || picked.has(publicModelId(slug, m.upstream))) : preset.models;
+
+  let added = 0;
+  let updated = 0;
+  db.transaction(() => {
+    for (const m of targets) {
+      const price = live?.get(m.upstream) || { input: m.input, cached: m.cached, output: m.output };
+      const id = publicModelId(slug, m.upstream);
+      const cur = db.prepare('SELECT * FROM models WHERE id = ?').get(id);
+      const row = modelRow({
+        ...(cur || {}),
+        id,
+        provider_id: provider.id,
+        upstream_model: m.upstreamModelId || m.upstream,
+        display_name: m.display_name,
+        input_price: price.input,
+        output_price: price.output,
+        cached_price: price.cached,
+        long_threshold: m.long_threshold,
+        input_price_long: m.input_long,
+        output_price_long: m.output_long,
+        cached_price_long: m.cached_long,
+        context_window: m.context_window,
+        max_output: m.max_output,
+        reasoning: m.reasoning,
+        notes: m.notes,
+        kind: m.kind || 'text',
+        price_image: m.price_image,
+        price_frame: m.price_frame,
+        min_frames: m.min_frames,
+        price_audio_hour: m.price_audio_hour,
+        price_search: m.price_search,
+        enabled: cur ? cur.enabled : 1,
+      });
+      if (cur) {
+        updateModel.run(row);
+        updated++;
+      } else {
+        insertModel.run({ ...row, created_at: Date.now() });
+        added++;
+      }
+    }
+  })();
+
   return c.json({
     ok: true,
     added,

@@ -7,7 +7,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Hono](https://img.shields.io/badge/Hono-HTTP-E36002?logo=hono&logoColor=white)](https://hono.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org)
-[![Tests](https://img.shields.io/badge/E2E%20Tests-61%2F61%20passing-2ea44f)](#testing)
+[![Tests](https://img.shields.io/badge/E2E%20Tests-63%2F63%20passing-2ea44f)](#testing)
 
 </div>
 
@@ -42,9 +42,12 @@ AI Gateway puts all your AI providers behind a single **OpenAI-compatible `/v1` 
   - `POST /v1/images/generations` & `POST /v1/images/edits` (JSON & multipart)
   - `POST /v1/audio/transcriptions` (OpenAI multipart `json` / `text` / `verbose_json` adapter) + native `/v1/asr/transcribe` & WebSocket `/v1/asr/realtime`
   - `GET /v1/models` & `GET /v1/models/{model}` (with `supported_endpoints` and `pricing` from a single source of truth)
-  - `GET /models.md` — clean public Markdown catalog for sharing with users or agents
-- **Multi-Provider Support**:
-  - **Direct API Key Providers**: Meta Model API (Muse Wonder/Spark/Ember, Muse Image, Muse Voice Transcribe, SAM 3.1), River (DeepSeek, Kimi, Qwen, GLM, Nemotron — with live pricing sync), plus any custom OpenAI-compatible provider.
+  - `GET /docs` & `GET /openapi.json` — interactive OpenAPI 3.1 API reference (Scalar, zero build step)
+  - `GET /models.md` — dynamic public Markdown catalog for sharing with users or AI agents
+- **300+ Providers Out of the Box + Custom URLs**:
+  - **Built-in `models.dev` (`@opencode-ai/models`) Directory**: Search and add 300+ OpenAI-compatible Direct API Key providers (OpenAI, OpenRouter, Google Gemini API, Groq, DeepSeek, xAI, Together, Fireworks, Mistral, Perplexity, Cerebras, DeepInfra, etc.) with official SVG logos, pricing, and context limits — just pick models and paste your API key.
+  - **Custom Providers**: Connect any self-hosted/custom OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM) and one-click import models directly from its `/v1/models` endpoint.
+  - **Direct Presets**: Meta Model API (Muse Wonder/Spark/Ember, Muse Image, Muse Voice Transcribe, SAM 3.1) and River (with live pricing sync).
   - **Subscription-to-API (OAuth, personal use)**: ChatGPT Codex (`GPT-6.2/6.1/6/5.6` + `GPT Image`) and Google Antigravity (`Gemini 4/3.8/3/2.5` + `Gemini 3.1 Flash Image`), unified under the exact same `reasoning_effort` parameter, with live quota inspection and equivalent API cost estimation.
 - **Fill-First Key & Account Pool**:
   - Uses the top healthy key/account first to maximize upstream **prompt cache hit rates**.
