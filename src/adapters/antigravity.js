@@ -303,23 +303,92 @@ function cleanSchema(node) {
 const fnName = (n) => (String(n || '_unknown').replace(/[^a-zA-Z0-9_.:\-]/g, '_').replace(/^([^a-zA-Z_])/, '_$1')).slice(0, 64);
 
 // ---------- OpenAI messages → Gemini contents ----------
+const AUDIO_MIME = {
+  wav: 'audio/wav', wave: 'audio/wav', mp3: 'audio/mp3', mpeg: 'audio/mpeg',
+  ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', m4a: 'audio/m4a',
+  opus: 'audio/opus', webm: 'audio/webm', amr: 'audio/amr', mp4: 'audio/mp4',
+};
+const EXT_MIME = {
+  ...AUDIO_MIME,
+  mp4: 'video/mp4', webm: 'video/webm',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json',
+  html: 'text/html', xml: 'text/xml', css: 'text/css', js: 'text/javascript', ts: 'text/x-typescript', py: 'text/x-python',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+function mimeFromFilename(name, fallback = 'application/octet-stream') {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  return EXT_MIME[ext] || fallback;
+}
+
+function dataUrlOrUriToPart(url, fallbackMime) {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('data:')) {
+    const c = url.indexOf(',');
+    if (c < 0) return null;
+    const mimeType = url.slice(5, c).split(';')[0] || fallbackMime;
+    return { inlineData: { mimeType, data: url.slice(c + 1) } };
+  }
+  return { fileData: { fileUri: url, mimeType: fallbackMime } };
+}
+
 function contentToParts(content) {
   if (typeof content === 'string') return content ? [{ text: content }] : [];
   if (!Array.isArray(content)) return [];
   const parts = [];
   for (const it of content) {
-    if (it.type === 'text') parts.push({ text: it.text });
-    else if (it.type === 'image_url') {
-      const url = typeof it.image_url === 'string' ? it.image_url : it.image_url?.url;
-      if (url?.startsWith('data:')) {
-        const c = url.indexOf(',');
-        parts.push({ inlineData: { mime_type: url.slice(5, c).split(';')[0], data: url.slice(c + 1) } });
-      } else if (url) parts.push({ fileData: { fileUri: url, mimeType: 'image/jpeg' } });
+    if (!it || typeof it !== 'object') continue;
+    if (it.type === 'text' || it.type === 'input_text' || it.type === 'output_text') {
+      if (it.text != null) parts.push({ text: String(it.text) });
+    } else if (it.type === 'image_url' || it.type === 'input_image') {
+      const url = typeof it.image_url === 'string' ? it.image_url : it.image_url?.url || it.url;
+      const p = dataUrlOrUriToPart(url, 'image/jpeg');
+      if (p) parts.push(p);
+    } else if (it.type === 'video_url' || it.type === 'input_video') {
+      const url = typeof it.video_url === 'string' ? it.video_url : it.video_url?.url || it.url;
+      const p = dataUrlOrUriToPart(url, 'video/mp4');
+      if (p) parts.push(p);
+    } else if (it.type === 'input_audio') {
+      const a = it.input_audio || it;
+      const rawData = a.data || a.audio || '';
+      if (typeof rawData === 'string' && rawData) {
+        if (rawData.startsWith('data:')) {
+          const p = dataUrlOrUriToPart(rawData, 'audio/wav');
+          if (p) parts.push(p);
+        } else {
+          const fmt = String(a.format || 'wav').toLowerCase();
+          parts.push({ inlineData: { mimeType: AUDIO_MIME[fmt] || `audio/${fmt}`, data: rawData } });
+        }
+      }
+    } else if (it.type === 'file' || it.type === 'input_file') {
+      const f = it.file || it;
+      const data = f.file_data || f.data;
+      const url = f.file_url || f.url;
+      const fallbackMime = f.mime_type || f.mimeType || mimeFromFilename(f.filename, 'application/pdf');
+      if (typeof data === 'string' && data) {
+        if (data.startsWith('data:')) {
+          const p = dataUrlOrUriToPart(data, fallbackMime);
+          if (p) parts.push(p);
+        } else {
+          parts.push({ inlineData: { mimeType: fallbackMime, data } });
+        }
+      } else if (typeof url === 'string' && url) {
+        const p = dataUrlOrUriToPart(url, fallbackMime);
+        if (p) parts.push(p);
+      }
     }
   }
   return parts;
 }
-const textOf = (content) => (typeof content === 'string' ? content : Array.isArray(content) ? content.filter((c) => c.type === 'text').map((c) => c.text).join('') : '');
+const textOf = (content) =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.filter((c) => c.type === 'text' || c.type === 'input_text').map((c) => c.text || '').join('')
+      : '';
 
 function messagesToContents(messages = []) {
   let systemInstruction = null;
@@ -435,8 +504,8 @@ function inputToMessages(input) {
   const msgs = [];
   for (const it of input) {
     if (it.type === 'message' || it.role) {
-      const text = Array.isArray(it.content) ? it.content.map((p) => p.text || '').join('') : String(it.content ?? '');
-      msgs.push({ role: it.role === 'developer' ? 'system' : it.role || 'user', content: text });
+      const role = it.role === 'developer' ? 'system' : it.role || 'user';
+      msgs.push({ role, content: Array.isArray(it.content) ? it.content : String(it.content ?? '') });
     }
   }
   return msgs;

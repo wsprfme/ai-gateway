@@ -297,6 +297,7 @@ export function buildOpenApiSpec(origin) {
             owned_by: { type: 'string', example: 'codex' },
             display_name: { type: 'string', example: 'GPT-6.2 Sol' },
             kind: { type: 'string', enum: ['text', 'image', 'transcribe', 'segment'] },
+            input_modalities: { type: 'array', items: { type: 'string', enum: ['text', 'image', 'audio', 'video', 'file'] } },
             context_window: { type: ['integer', 'null'] },
             max_output: { type: ['integer', 'null'] },
             supported_endpoints: { type: 'array', items: { type: 'string' } },

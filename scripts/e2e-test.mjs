@@ -215,7 +215,7 @@ await new Promise((r) => upstream.listen(UP_PORT, '127.0.0.1', r));
 // ---- Jalankan gateway ----
 const gw = spawn(process.execPath, ['src/server.js'], {
   cwd: ROOT,
-  env: { ...process.env, PORT: GW_PORT, HOST: '127.0.0.1', DB_PATH: tmpDb, ADMIN_PASSWORD: 'test-pass', APP_SECRET: 'test-secret-0123456789',
+  env: { ...process.env, PORT: GW_PORT, HOST: '127.0.0.1', TLS_PORT: '', HTTP_PORT: '', DB_PATH: tmpDb, ADMIN_PASSWORD: 'test-pass', APP_SECRET: 'test-secret-0123456789',
     CODEX_BASE_URL: `http://127.0.0.1:${UP_PORT}/codex-responses`, CODEX_TOKEN_URL: `http://127.0.0.1:${UP_PORT}/codex-token`,
     CODEX_USAGE_URL: `http://127.0.0.1:${UP_PORT}/codex-usage`, CODEX_IMAGES_URL: `http://127.0.0.1:${UP_PORT}/codex-images/generations`,
     AG_BASE_URL: `http://127.0.0.1:${UP_PORT}`, AG_TOKEN_URL: `http://127.0.0.1:${UP_PORT}/ag-token`,
@@ -742,6 +742,29 @@ try {
     assert.equal(up.body.model, 'gemini-3.8-flash-low', 'reasoning_effort low → gemini-3.8-flash-low');
   });
 
+  await test('Antigravity: multimodal input (audio, video, PDF) diterjemahkan ke inlineData Gemini', async () => {
+    const n = seen.length;
+    const r = await chat({
+      model: 'antigravity/gemini-4-hydrogen',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Analisis semua file ini' },
+          { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } },
+          { type: 'video_url', video_url: { url: 'data:video/mp4;base64,AAAA' } },
+          { type: 'file', file: { filename: 'doc.pdf', file_data: 'JVBERi0=' } },
+        ],
+      }],
+    });
+    assert.equal(r.status, 200);
+    const up = seen.slice(n).find((s) => s.url && s.url.includes(':streamGenerateContent'));
+    const parts = up.body.request.contents[0].parts;
+    assert.equal(parts[0].text, 'Analisis semua file ini');
+    assert.deepEqual(parts[1], { inlineData: { mimeType: 'audio/wav', data: 'UklGRg==' } });
+    assert.deepEqual(parts[2], { inlineData: { mimeType: 'video/mp4', data: 'AAAA' } });
+    assert.deepEqual(parts[3], { inlineData: { mimeType: 'application/pdf', data: 'JVBERi0=' } });
+  });
+
   await test('Antigravity: /v1/images/generations', async () => {
     const r = await fetch(GW + '/v1/images/generations', {
       method: 'POST',
@@ -824,8 +847,13 @@ try {
     assert.equal(m1.id, 'codex/gpt-6.2-sol');
     assert.equal(m1.object, 'model');
     assert.deepEqual(m1.supported_endpoints, ['/v1/chat/completions', '/v1/responses']);
+    assert.deepEqual(m1.input_modalities, ['text', 'image']);
     assert.equal(m1.pricing.input, 2);
     assert.equal(m1.upstream_model, undefined, 'detail internal tidak bocor');
+
+    const rAg = await fetch(GW + '/v1/models/antigravity/gemini-4-hydrogen', { headers: { authorization: `Bearer ${key}` } });
+    assert.equal(rAg.status, 200);
+    assert.deepEqual((await rAg.json()).input_modalities, ['text', 'image', 'audio', 'video', 'file']);
 
     const r2 = await fetch(GW + '/v1/models/' + encodeURIComponent('antigravity/gemini-3.1-flash-image'), { headers: { authorization: `Bearer ${key}` } });
     assert.equal(r2.status, 200);

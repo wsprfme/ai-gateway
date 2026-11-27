@@ -8,4 +8,5 @@ certs/
 vendor-src/
 whats.md
 how.md
+INTERNAL.md
 .tmp-*

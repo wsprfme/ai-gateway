@@ -1,10 +1,10 @@
 // Halaman publik /models.md: katalog ringkas model aktif untuk pengguna API.
 // Detail internal (upstream model, base URL, mekanisme langganan/routing) didokumentasikan di how.md.
 import { db } from './db.js';
-import { supportedEndpointsFor } from './catalog.js';
+import { supportedEndpointsFor, inputModalitiesFor } from './catalog.js';
 
-const TABLE_HEAD = '| Model ID | Jenis | Endpoint | Konteks | Max output | Harga (in/cache/out per 1Jt) | Reasoning / Catatan |';
-const TABLE_SEP = '|---|---|---|---|---|---|---|';
+const TABLE_HEAD = '| Model ID | Jenis | Input | Endpoint | Konteks | Max output | Harga (in/cache/out per 1Jt) | Reasoning / Catatan |';
+const TABLE_SEP = '|---|---|---|---|---|---|---|---|';
 
 // Harga kecil (mis. cached $0.0075) tetap terbaca: minimal 2 desimal, maksimal 4.
 const money = (v) =>
@@ -78,7 +78,7 @@ export function renderModelsMarkdown() {
     for (const m of list) {
       const row = { ...m, slug: p.slug, auth_type: p.auth_type };
       out.push(
-        `| \`${m.id}\` | ${KIND_LABEL[m.kind] || m.kind} | ${endpointsCell(row)} | ${num(m.context_window)} | ${num(m.max_output)} | ${priceCell(row)} | ${infoCell(row)} |`
+        `| \`${m.id}\` | ${KIND_LABEL[m.kind] || m.kind} | ${inputModalitiesFor(row).join(', ')} | ${endpointsCell(row)} | ${num(m.context_window)} | ${num(m.max_output)} | ${priceCell(row)} | ${infoCell(row)} |`
       );
     }
     out.push('');

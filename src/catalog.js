@@ -265,6 +265,22 @@ export function supportedEndpointsFor(row) {
   return ['/v1/chat/completions', '/v1/completions', '/v1/responses', '/v1/embeddings'];
 }
 
+export function inputModalitiesFor(row) {
+  const kind = row.kind || 'text';
+  const slug = row.slug || row.provider_slug || '';
+  const auth = row.auth_type || 'apikey';
+  const entry = CATALOG_MODEL_INDEX.get(row.id);
+  if (entry?.model?.input_modalities) return [...entry.model.input_modalities];
+
+  if (kind === 'transcribe') return ['audio'];
+  if (kind === 'segment') return ['text', 'image', 'video'];
+  if (kind === 'image') return ['text', 'image'];
+  if (auth === 'antigravity') return ['text', 'image', 'audio', 'video', 'file'];
+  if (auth === 'codex' || slug === 'meta') return ['text', 'image'];
+  if (slug === 'river-ai') return /vl|vision/i.test(row.upstream_model || row.id || '') ? ['text', 'image'] : ['text'];
+  return ['text'];
+}
+
 // Bentuk metadata publik satu model (dipakai bersama oleh GET /v1/models dan GET /v1/models/{model}).
 export function formatModelObject(row) {
   const pricing = {
@@ -294,6 +310,7 @@ export function formatModelObject(row) {
     owned_by: row.slug || row.provider_slug || 'gateway',
     display_name: row.display_name || row.id,
     kind: row.kind || 'text',
+    input_modalities: inputModalitiesFor(row),
     context_window: row.context_window ?? null,
     max_output: row.max_output ?? null,
     supported_endpoints: supportedEndpointsFor(row),

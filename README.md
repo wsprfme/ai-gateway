@@ -2,18 +2,18 @@
 
 # AI Gateway
 
-**Self-hosted, OpenAI-compatible AI Gateway** — one endpoint, one API key, multiple AI providers, zero frontend build step, and a single SQLite file.
+**Self-hosted, OpenAI-compatible AI Gateway** — one endpoint, one API key, 300+ providers, zero frontend build step, and a single SQLite file.
 
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Hono](https://img.shields.io/badge/Hono-HTTP-E36002?logo=hono&logoColor=white)](https://hono.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org)
-[![Tests](https://img.shields.io/badge/E2E%20Tests-63%2F63%20passing-2ea44f)](#testing)
+[![Tests](https://img.shields.io/badge/E2E%20Tests-64%2F64%20passing-2ea44f)](#testing)
 
 </div>
 
 ---
 
-AI Gateway puts all your AI providers behind a single **OpenAI-compatible `/v1` API** with automatic **fill-first account/key pooling**, **quota-aware auto-cooldown**, **per-request token & cost tracking** (including reasoning tokens, images, audio seconds, video frames, and web search), and a fast **vanilla JS/CSS dashboard** that feels native on both desktop and mobile.
+AI Gateway puts all your AI providers behind a single **OpenAI-compatible `/v1` API** with automatic **fill-first account/key pooling**, **quota-aware auto-cooldown**, **per-request token & cost tracking** (including reasoning tokens, images, audio seconds, video frames, and web search), **interactive OpenAPI 3.1 docs**, and a fast **vanilla JS/CSS dashboard** that feels native on both desktop and mobile.
 
 ## Preview
 
@@ -37,25 +37,26 @@ AI Gateway puts all your AI providers behind a single **OpenAI-compatible `/v1` 
 ## Highlights
 
 - **Drop-in OpenAI Compatibility**: Works out of the box with official OpenAI Python/Node SDKs, Cursor, Cline, n8n, or `curl`.
-  - `POST /v1/chat/completions` (streaming + `delta.reasoning_content`, tool calls)
-  - `POST /v1/responses` (Responses API + streaming)
-  - `POST /v1/images/generations` & `POST /v1/images/edits` (JSON & multipart)
-  - `POST /v1/audio/transcriptions` (OpenAI multipart `json` / `text` / `verbose_json` adapter) + native `/v1/asr/transcribe` & WebSocket `/v1/asr/realtime`
-  - `GET /v1/models` & `GET /v1/models/{model}` (with `supported_endpoints` and `pricing` from a single source of truth)
+  - `POST /v1/chat/completions` — streaming + `delta.reasoning_content`, tool calls, and multimodal inputs (`image_url`, `input_audio`, `video_url`, `file`/PDF)
+  - `POST /v1/responses` — OpenAI Responses API + streaming
+  - `POST /v1/images/generations` & `POST /v1/images/edits` — JSON & multipart
+  - `POST /v1/audio/transcriptions` — OpenAI multipart adapter (`json` / `text` / `verbose_json`) + native `/v1/asr/transcribe` & WebSocket `/v1/asr/realtime`
+  - `GET /v1/models` & `GET /v1/models/{model}` — supports `/` in model IDs, exposing `supported_endpoints`, `input_modalities`, and `pricing` from a single source of truth
   - `GET /docs` & `GET /openapi.json` — interactive OpenAPI 3.1 API reference (Scalar, zero build step)
   - `GET /models.md` — dynamic public Markdown catalog for sharing with users or AI agents
 - **300+ Providers Out of the Box + Custom URLs**:
-  - **Built-in `models.dev` (`@opencode-ai/models`) Directory**: Search and add 300+ OpenAI-compatible Direct API Key providers (OpenAI, OpenRouter, Google Gemini API, Groq, DeepSeek, xAI, Together, Fireworks, Mistral, Perplexity, Cerebras, DeepInfra, etc.) with official SVG logos, pricing, and context limits — just pick models and paste your API key.
-  - **Custom Providers**: Connect any self-hosted/custom OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM) and one-click import models directly from its `/v1/models` endpoint.
+  - **Built-in `models.dev` (`@opencode-ai/models`) Directory**: Search and install from 300+ OpenAI-compatible Direct API Key providers (OpenAI, OpenRouter, Google Gemini API, Groq, DeepSeek, xAI, Together, Fireworks, Mistral, Perplexity, Cerebras, DeepInfra, etc.) with official SVG logos, pricing, and context limits — pick the models you want and paste your API key.
+  - **Custom Providers**: Connect any self-hosted or custom OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM) and one-click import models directly from its `GET /v1/models` endpoint.
   - **Direct Presets**: Meta Model API (Muse Wonder/Spark/Ember, Muse Image, Muse Voice Transcribe, SAM 3.1) and River (with live pricing sync).
-  - **Subscription-to-API (OAuth, personal use)**: ChatGPT Codex (`GPT-6.2/6.1/6/5.6` + `GPT Image`) and Google Antigravity (`Gemini 4/3.8/3/2.5` + `Gemini 3.1 Flash Image`), unified under the exact same `reasoning_effort` parameter, with live quota inspection and equivalent API cost estimation.
+  - **Subscription-to-API (OAuth, personal use)**: ChatGPT Codex (`GPT-6.2/6.1/6/5.6` + `GPT Image`) and Google Antigravity (`Gemini 4/3.8/3/2.5` with text/image/audio/video/PDF input + `Gemini 3.1 Flash Image`), unified under the standard `reasoning_effort` parameter, with live quota inspection and equivalent API cost estimation.
 - **Fill-First Key & Account Pool**:
   - Uses the top healthy key/account first to maximize upstream **prompt cache hit rates**.
   - Automatically fails over on `429` (per-key/model cooldown with reset timestamp parsing), `402` (`exhausted`), `401/403` (`invalid`), or proactively via **quota-based auto-cooldown** before hitting `429`.
   - Encrypted at rest with **AES-256-GCM** (`APP_SECRET`).
-- **Built-in Playground & Analytics Dashboard**:
-  - Chat UI with local history, **compare up to 4 models side-by-side**, streaming Markdown + collapsible thinking box, and per-reply speed (`tok/s`), TTFT, token, and cost metrics.
-  - Daily/monthly spend charts, cache hit rate, latency/TTFT, error rate, CSV log export, and hard daily/monthly budget caps.
+- **Unified Dashboard & Playground**:
+  - **Unified Provider & Model page**: distinct sections for Subscription (OAuth) vs Direct API Key, collapsible model dropdown under each provider, and live search across 300+ providers.
+  - **Chat Playground**: local history, **compare up to 4 models side-by-side**, streaming Markdown + collapsible thinking box, and per-reply speed (`tok/s`), TTFT, token, and cost metrics.
+  - **Analytics & Controls**: daily/monthly spend charts, cache hit rate, latency/TTFT, error rate, CSV log export, and hard daily/monthly budget caps.
   - **Zero frontend build step** — pure HTML/CSS/ESM JS with automatic content-hash asset versioning (`?v=hash`).
 
 ---
@@ -77,13 +78,13 @@ Edit `.env` and set `ADMIN_PASSWORD` and a random `APP_SECRET` (minimum 16 chara
 npm start
 ```
 
-Open `http://localhost:8787`, sign in, install a provider catalog or add your own provider, and generate a gateway API key (`sk-gw-...`).
+Open `http://localhost:8787`, sign in, add a provider from the 300+ directory (or custom URL), and generate a gateway API key (`sk-gw-...`).
 
 ---
 
 ## Usage Examples
 
-### Chat & Reasoning (Python OpenAI SDK)
+### Chat, Reasoning & Multimodal (Python OpenAI SDK)
 
 ```python
 from openai import OpenAI
@@ -123,12 +124,14 @@ with open("sample.wav", "rb") as f:
 print(tr.text)
 ```
 
-### Model Discovery
+### Model Discovery & Docs
 
 ```bash
 curl -H "Authorization: Bearer sk-gw-..." http://localhost:8787/v1/models
-curl -H "Authorization: Bearer sk-gw-..." http://localhost:8787/v1/models/codex/gpt-6.2-sol
+curl -H "Authorization: Bearer sk-gw-..." http://localhost:8787/v1/models/antigravity/gemini-4-hydrogen
 curl http://localhost:8787/models.md
+curl http://localhost:8787/openapi.json
+# Interactive docs: http://localhost:8787/docs
 ```
 
 ---
@@ -142,6 +145,7 @@ curl http://localhost:8787/models.md
 | Database | SQLite via `better-sqlite3` (single file in `data/gateway.db`) |
 | Encryption | AES-256-GCM (`node:crypto`) |
 | Frontend | Vanilla JS + CSS (no bundler, Geist font, bundled SVG icons) |
+| API Docs | OpenAPI 3.1.0 (`/openapi.json`) + Scalar (`/docs`) + Markdown (`/models.md`) |
 
 ---
 
@@ -174,9 +178,9 @@ location / {
 
 Set Node.js `22+`, startup file `app.cjs`, configure `ADMIN_PASSWORD` and `APP_SECRET`, run `npm install`, and restart.
 
-### Windows / Cloudflare Full
+### Windows (24/7 Auto-Start on Boot)
 
-Supports optional built-in HTTPS listener via `TLS_PORT`, `TLS_KEY`, and `TLS_CERT` in `.env` for direct Cloudflare Full mode, or pair with Cloudflare Tunnel / Caddy.
+Supports optional built-in HTTPS listener via `TLS_PORT`, `TLS_KEY`, and `TLS_CERT` in `.env` for direct Cloudflare Full mode, or pair with Cloudflare Tunnel / Caddy. For 24/7 operation across reboots, run via Windows Task Scheduler (`ONSTART`, `ExecutionTimeLimit=PT0S`) with a restart loop or NSSM / PM2.
 
 ---
 
@@ -186,7 +190,7 @@ Supports optional built-in HTTPS listener via `TLS_PORT`, `TLS_KEY`, and `TLS_CE
 npm test
 ```
 
-Runs the full end-to-end test suite (`scripts/e2e-test.mjs`) against an isolated mock upstream and temporary SQLite database, covering routing, streaming, reasoning deltas, fill-first pooling, quota auto-cooldown, fallback, multimodal endpoints, pricing, budgets, and OpenAI error contracts (**61/61 tests**).
+Runs the full end-to-end test suite (`scripts/e2e-test.mjs`) against an isolated mock upstream and temporary SQLite database, covering routing, streaming, reasoning deltas, multimodal inputs, fill-first pooling, quota auto-cooldown, fallback, audio transcriptions, `models.dev` directory, custom `/v1/models` import, OpenAPI `/docs`, pricing, budgets, and OpenAI error contracts (**64/64 tests**).
 
 ---
 
