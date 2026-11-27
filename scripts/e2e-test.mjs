@@ -765,6 +765,22 @@ try {
     assert.deepEqual(parts[3], { inlineData: { mimeType: 'application/pdf', data: 'JVBERi0=' } });
   });
 
+  await test('Antigravity: tool_calls meneruskan thoughtSignature pada giliran ke-2', async () => {
+    const n = seen.length;
+    const r = await chat({
+      model: 'antigravity/gemini-4-neon',
+      messages: [
+        { role: 'user', content: 'cuaca?' },
+        { role: 'assistant', content: '', tool_calls: [{ id: 'call_sig_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Jakarta"}' } }] },
+        { role: 'tool', tool_call_id: 'call_sig_1', content: '{"temp":31}' },
+      ],
+    });
+    assert.equal(r.status, 200);
+    const up = seen.slice(n).find((s) => s.url && s.url.includes(':streamGenerateContent'));
+    const fcPart = up.body.request.contents.find((c) => c.role === 'model')?.parts?.[0];
+    assert.ok(fcPart?.functionCall && typeof fcPart.thoughtSignature === 'string' && fcPart.thoughtSignature.length > 0, 'thoughtSignature disertakan pada functionCall');
+  });
+
   await test('Antigravity: /v1/images/generations', async () => {
     const r = await fetch(GW + '/v1/images/generations', {
       method: 'POST',

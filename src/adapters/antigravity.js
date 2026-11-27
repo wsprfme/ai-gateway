@@ -390,6 +390,15 @@ const textOf = (content) =>
       ? content.filter((c) => c.type === 'text' || c.type === 'input_text').map((c) => c.text || '').join('')
       : '';
 
+// Simpan thoughtSignature per tool_call id agar giliran kedua (tool_result) diterima Gemini 3/4.
+const thoughtSignatures = new Map();
+const FALLBACK_THOUGHT_SIG = 'skip_thought_signature_validator';
+function saveThoughtSignature(id, sig) {
+  if (!id || !sig) return;
+  if (thoughtSignatures.size >= 500) thoughtSignatures.delete(thoughtSignatures.keys().next().value);
+  thoughtSignatures.set(id, sig);
+}
+
 function messagesToContents(messages = []) {
   let systemInstruction = null;
   const contents = [];
@@ -415,7 +424,8 @@ function messagesToContents(messages = []) {
         } catch {
           /* argumen bukan JSON */
         }
-        parts.push({ functionCall: { id: tc.id, name: fnName(tc.function?.name), args } });
+        const sig = thoughtSignatures.get(tc.id) || FALLBACK_THOUGHT_SIG;
+        parts.push({ functionCall: { id: tc.id, name: fnName(tc.function?.name), args }, thoughtSignature: sig });
         calls.push({ id: tc.id, name: tc.function?.name });
       }
       if (parts.length) contents.push({ role: 'model', parts });
@@ -552,7 +562,10 @@ export function feedLine(state, line) {
   let reasoning = null;
   for (const part of cand?.content?.parts || []) {
     if (part.functionCall) {
-      state.toolCalls.set(part.functionCall.id || state._i++, { id: part.functionCall.id || `call_${state._i}`, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) });
+      const callId = part.functionCall.id || `call_${state._i}`;
+      const sig = part.thoughtSignature || part.thought_signature;
+      if (sig) saveThoughtSignature(callId, sig);
+      state.toolCalls.set(part.functionCall.id || state._i++, { id: callId, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) });
     } else if (part.text) {
       if (part.thought === true) { state.reasoning += part.text; reasoning = (reasoning || '') + part.text; }
       else { state.text += part.text; text = (text || '') + part.text; }

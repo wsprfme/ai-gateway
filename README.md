@@ -7,7 +7,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Hono](https://img.shields.io/badge/Hono-HTTP-E36002?logo=hono&logoColor=white)](https://hono.dev)
 [![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org)
-[![Tests](https://img.shields.io/badge/E2E%20Tests-64%2F64%20passing-2ea44f)](#testing)
+[![Tests](https://img.shields.io/badge/E2E%20Tests-65%2F65%20passing-2ea44f)](#testing)
 
 </div>
 
@@ -190,7 +190,7 @@ Supports optional built-in HTTPS listener via `TLS_PORT`, `TLS_KEY`, and `TLS_CE
 npm test
 ```
 
-Runs the full end-to-end test suite (`scripts/e2e-test.mjs`) against an isolated mock upstream and temporary SQLite database, covering routing, streaming, reasoning deltas, multimodal inputs, fill-first pooling, quota auto-cooldown, fallback, audio transcriptions, `models.dev` directory, custom `/v1/models` import, OpenAPI `/docs`, pricing, budgets, and OpenAI error contracts (**64/64 tests**).
+Runs the full end-to-end test suite (`scripts/e2e-test.mjs`) against an isolated mock upstream and temporary SQLite database, covering routing, streaming, reasoning deltas, multimodal inputs, fill-first pooling, quota auto-cooldown, fallback, audio transcriptions, `models.dev` directory, custom `/v1/models` import, OpenAPI `/docs`, pricing, budgets, and OpenAI error contracts (**65/65 tests**).
 
 ---
 
